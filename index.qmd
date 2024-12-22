@@ -1,0 +1,745 @@
+---
+title: "community-notes-r"
+---
+
+```{r data and libraries}
+
+# load base libraries
+# specialized libraries are included at line-level in usage chunks
+library(tidyverse)
+library(lubridate)
+
+# disable scientific notation
+options(scipen = 999)
+
+# all springfield hoax noted tweets
+tweets <- read_csv("data/tweet_data.csv",
+                   col_types = cols(tweetCreatedAt = col_datetime(format = "%Y-%m-%d %H:%M:%S+00:00"))) %>%
+          distinct(id, .keep_all = TRUE)
+
+# all hoax tweeters
+users <- read_csv("data/author_data.csv", 
+                  col_types = cols(user_created_at = col_datetime(format = "%Y-%m-%d %H:%M:%S+00:00")))
+
+# all hoax community notes
+haiti_notes <- read_csv("data/haiti community notes.xlsx - catsORdogsOReat.csv", 
+                        col_types = cols(noteCreatedAt = col_datetime(format = "%m/%d/%Y %H:%M:%S"),
+                                         misleadingOther = col_double())) %>%
+          distinct(noteId, .keep_all = TRUE)
+
+# complete community note status history
+note_status_history <- read_tsv("data/noteStatusHistory/noteStatusHistory-00000.tsv")
+
+# complete community note user enrollment statuses
+user_enroll_status <- read_tsv("data/userEnrollmentStatus/userEnrollment-00000.tsv") 
+
+# intitalize filtered ratings dataset
+hoax_note_ratings <- read_csv("data/noteRatings/filtered_ratings/all_filter_ratings.csv",
+                              col_types = cols(
+                                raterParticipantId = col_character(),
+                                helpfulnessLevel = col_character(),
+                                .default = col_number()           
+                              ))
+# removed deprecated ratings from dataset
+hoax_note_ratings <- hoax_note_ratings %>% 
+  select(-c(notHelpful, helpfulInformative, helpfulEmpathetic, 
+            helpfulUniqueContext, notHelpfulOutdated, notHelpfulOffTopic))
+
+```
+
+```{r converting epoch time in dfs}
+
+# convert all specified epoch time columns to formatted datetime
+note_status_history <- note_status_history %>%
+  mutate(across(
+    .cols = c(createdAtMillis, timestampMillisOfFirstNmrDueToMinStableCrhTime,
+              timestampMillisOfCurrentStatus, timestampMillisOfLatestNonNMRStatus,
+              timestampMillisOfStatusLock, timestampMillisOfRetroLock, timestampMillisOfMostRecentStatusChange), 
+    .fns = ~ format(
+      as_datetime(./1000, origin = "1970-01-01", tz = "UTC"),  # divide by 1000 and convert
+      format = "%Y-%m-%d %H:%M:%S+00:00")
+  ))
+
+# convert all specified epoch time columns to formatted datetime
+user_enroll_status <- user_enroll_status %>%
+  mutate(across(
+    .cols = c(timestampOfLastStateChange, timestampOfLastEarnOut),
+    .fns = ~ format(
+      as_datetime(./1000, origin = "1970-01-01", tz = "UTC"), 
+      format = "%Y-%m-%d %H:%M:%S+00:00")
+  ))
+
+# convert all specified epoch time columns to formatted datetime
+hoax_note_ratings <- hoax_note_ratings %>%
+  mutate(across(
+    .cols = (createdAtMillis),
+    .fns = ~ format(
+      as_datetime(./1000, origin = "1970-01-01", tz = "UTC"), 
+      format = "%Y-%m-%d %H:%M:%S+00:00")
+  ))
+
+```
+
+```{r joining data sets}
+
+# assign community notes for corresponding tweets
+noted_tweets <- haiti_notes %>%
+  left_join(tweets, by = c("tweetId" = "id"))
+
+# assign tweets to users
+user_tweets <- tweets %>%
+  left_join(users, by =c("authorId" = "id"))
+
+```
+
+```{r hoax note ratings means}
+
+# calculate ratings summation for each note
+hoax_note_ratings_sum <- hoax_note_ratings %>%
+  group_by(noteId) %>%
+  summarize(
+    ratedOnTweetId_count = n(), # Count observations
+    agree_mean = mean(agree, na.rm = TRUE),
+    disagree_mean = mean(disagree, na.rm = TRUE),
+    helpfulOther_mean = mean(helpfulOther, na.rm = TRUE),
+    helpfulClear_mean = mean(helpfulClear, na.rm = TRUE),
+    helpfulGoodSources_mean = mean(helpfulGoodSources, na.rm = TRUE),
+    helpfulAddressesClaim_mean = mean(helpfulAddressesClaim, na.rm = TRUE),
+    helpfulImportantContext_mean = mean(helpfulImportantContext, na.rm = TRUE),
+    helpfulUnbiasedLanguage_mean = mean(helpfulUnbiasedLanguage, na.rm = TRUE),
+    notHelpfulOther_mean = mean(notHelpfulOther, na.rm = TRUE),
+    notHelpfulIncorrect_mean = mean(notHelpfulIncorrect, na.rm = TRUE),
+    notHelpfulSourcesMissingOrUnreliable_mean = mean(notHelpfulSourcesMissingOrUnreliable, na.rm = TRUE),
+    notHelpfulMissingKeyPoints_mean = mean(notHelpfulMissingKeyPoints, na.rm = TRUE),
+    notHelpfulHardToUnderstand_mean = mean(notHelpfulHardToUnderstand, na.rm = TRUE),
+    notHelpfulArgumentativeOrBiased_mean = mean(notHelpfulArgumentativeOrBiased, na.rm = TRUE),
+    notHelpfulSpamHarassmentOrAbuse_mean = mean(notHelpfulSpamHarassmentOrAbuse, na.rm = TRUE),
+    notHelpfulIrrelevantSources_mean = mean(notHelpfulIrrelevantSources, na.rm = TRUE),
+    notHelpfulOpinionSpeculation_mean = mean(notHelpfulOpinionSpeculation, na.rm = TRUE),
+    notHelpfulNoteNotNeeded_mean = mean(notHelpfulNoteNotNeeded, na.rm = TRUE)
+  )
+hoax_note_ratings_sum
+
+```
+
+```{r time difference betweet tweet post and note tag}
+
+# calculate the difference in time
+noted_tweets <- noted_tweets %>%
+  mutate(time_difference = as.numeric(abs(difftime(noteCreatedAt, tweetCreatedAt, units = "hours"))))
+
+# calculate lag time between tweet post and note tag for each tweet
+time_diff_note <- noted_tweets %>%
+  select(noteId, tweetCreatedAt,  noteCreatedAt, time_difference, text, summary, likes, replies, retweets, quotes)
+
+# calculate average lag time between tweet post and note tag
+avg_note_lag <- time_diff_note %>%
+  summarize(avg_note_lag = sum(time_difference, na.rm = TRUE) / n())
+print(avg_note_lag)
+
+# group by before and after the trump-harris presidential debate (12AM 9/11/2024) and calculate average note lag
+avg_note_lag_debate <- time_diff_note %>%
+  mutate(debate = ifelse(noteCreatedAt < as.Date("2024-09-11"), "Before September 10, 11:59 PM", "On or After September 11, 12 AM")) %>%
+  group_by(debate) %>%
+  summarize(
+    num = n(),
+    avg_note_lag = sum(time_difference, na.rm = TRUE) / n())
+print(avg_note_lag_debate)
+
+```
+
+```{r top users and tweeters}
+
+# find number of tweets by user
+tweets_by_user <- user_tweets %>%
+  group_by(name) %>%
+  summarize(num = n())
+tweets_by_user
+
+# create df of top-25 hoax tweeters
+top_tweeters <- user_tweets %>%
+  drop_na(username) %>%
+  count(name, sort = TRUE) %>%
+  head(25) %>%
+  inner_join(users, by = "name") %>%
+  select(id, name, username, followers_count, tweet_count, user_created_at, n)
+top_tweeters
+
+# create df of top-25 most followed tweeters
+most_followed <- users %>%
+  arrange(desc(followers_count)) %>%
+  head(25) %>%
+  select(id, name, username, followers_count, tweet_count, user_created_at)
+most_followed
+
+# add a grouping column to noted_tweets
+noted_tweets <- noted_tweets %>%
+  mutate(
+    topHoaxTweeter = ifelse(authorId %in% top_tweeters$id, 1, 0),
+    topFollowedUser = ifelse(authorId %in% most_followed$id, 1, 0)
+  )
+
+```
+
+```{r plots on distribution of tweets over main hoax}
+
+# create time-series
+tweets_by_date <- tweets %>%
+  mutate(date = as.Date(tweetCreatedAt)) %>%  # extract date from date-time
+  group_by(date) %>%
+  summarize(tweet_count = n())
+
+# plot time series of Community Notes
+tweets_time_series <- ggplot(tweets_by_date, aes(x = date, y = tweet_count)) +
+  geom_line() +
+  labs(title = "Tweets Posted Over Time",
+       x = "Date",
+       y = "Number of Tweets") +
+  theme_minimal() + 
+  scale_x_date(date_breaks = "2 day", date_labels = "%b %d") +
+  geom_vline(xintercept = as.Date("2024-09-10"), color = "blue", linetype = "dashed", linewidth = 1) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+tweets_time_series
+
+# create histogram
+tweets_hist <- ggplot(tweets, aes(x = as.Date(tweetCreatedAt))) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "black") +
+  labs(title = "",
+       x = "",
+       y = "") +
+  theme_minimal() +
+  geom_vline(xintercept = as.Date("2024-09-10"), color = "blue", linetype = "dashed", linewidth = 1) +
+  theme(axis.text.x = element_text( hjust = 1))
+tweets_hist
+
+```
+
+```{r plots on note time difference and number of likes}
+
+# viz of correlation between note time difference and number of likes
+diff_likes <- ggplot(noted_tweets, aes(x = time_difference, y = likes)) +
+  geom_jitter(aes(color = factor(topHoaxTweeter + 2 * topFollowedUser)),
+              width = 0.5, height = 1.5, alpha = 0.7) + 
+  xlim(NA, 24) +
+  geom_smooth(method = 'lm', formula = y ~ x, color = "black") +
+  scale_color_manual(
+    values = c("0" = "gray", "1" = "blue", "2" = "orange", "3" = "green"),
+    labels = c(
+      "0" = "Others",
+      "1" = "Top 25 Hoax Tweeter",
+      "2" = "Top 25 Followed User",
+      "3" = "Both Groups"
+    )
+  ) +
+  labs(
+    title = "",
+    x = "Time Difference (hours)",
+    y = "Number of Likes",
+    color = "Group"
+  ) +
+  theme_minimal()
+diff_likes
+
+# filter noted-tweets for top-25 hoax tweeters
+top25_tweeters <- noted_tweets %>%
+  filter(authorId %in% top_tweeters$id)  # Match usernames
+
+  # correlation between note time difference and number of likes
+  diff_likes_hoax <- ggplot(top25_tweeters, aes(x = time_difference, y = likes)) +
+    geom_jitter(width = 0.5, height = 1.5, color = "blue", alpha = 0.7) +
+    xlim(NA, 24) +
+    geom_smooth(method = "lm", formula = y ~ x, color = "red") +
+    labs(title = "Time Difference vs Likes (Top-25 Hoax Tweeters)",
+         x = "Time Difference (hours)",
+         y = "Likes") +
+    theme_minimal()
+  diff_likes_hoax
+
+# filter for top-25 most followed tweeters
+top25_followed_users <- noted_tweets %>%
+  filter(authorId %in% most_followed$id)  # Match usernames
+
+  # correlation between note time difference and number of likes
+  diff_likes_followed <- ggplot(top25_followed_users, aes(x = time_difference, y = likes)) +
+    geom_jitter(width = 0.5, height = 1.5, color = "green", alpha = 0.7) +
+    xlim(NA, 24) +
+    geom_smooth(method = "lm", formula = y ~ x, color = "red") +
+    labs(title = "Time Difference vs Likes (Top-25 Most Followed Tweeters)",
+         x = "Time Difference (hours)",
+         y = "Likes") +
+    theme_minimal()
+  diff_likes_followed
+
+```
+
+```{r time difference between tweet post and note tag}
+
+# calculate lag time between tweet post and note tag for each tweet
+note_lag_top_users <- noted_tweets %>%
+  filter(topHoaxTweeter | topFollowedUser == 1) %>%
+  select(tweetCreatedAt,  noteCreatedAt, time_difference, text, summary, likes, replies, retweets, quotes, topHoaxTweeter, topFollowedUser)
+
+# calculate average lag time between tweet post and note tag
+avg_note_lag_top_users <- note_lag_top_users %>%
+  summarize(avg_note_lag = sum(time_difference, na.rm = TRUE) / n(),
+            avg_like = sum(likes, na.rm = TRUE) / n(),
+            avg_reply = sum(replies, na.rm = TRUE) / n(),
+            avg_retweet = sum(retweets, na.rm = TRUE) / n(),
+            avg_quote = sum(quotes, na.rm = TRUE) / n()) %>%
+print(avg_note_lag)
+
+# group by before and after the trump-harris presidential debate (12AM 9/11/2024) and calculate average note lag
+avg_note_lag_by_group <- note_lag_top_users %>%
+  mutate(debate = ifelse(noteCreatedAt < as.Date("2024-09-11"), "Before September 10, 11:59 PM", "On or After September 11, 12 AM")) %>%
+  group_by(debate) %>%
+  summarize(
+    num = n(),
+    avg_note_lag = sum(time_difference, na.rm = TRUE) / n(),
+            avg_like = sum(likes) / n(),
+            avg_reply = sum(replies) / n(),
+            avg_retweet = sum(retweets) / n(),
+            avg_quote = sum(quotes) / n())
+print(avg_note_lag_by_group)
+
+```
+
+```{r}
+
+# histogram of Community Note lag time difference
+lag_hist <- ggplot(note_lag_top_users, aes(x = time_difference)) +
+  geom_histogram(binwidth = 1, fill = "skyblue", color = "black") +
+  labs(
+    title = "",
+    x = "",
+    y = ""
+  ) +
+  theme_minimal()
+lag_hist
+
+```
+
+```{r}
+
+# append Community Notes ratings sum data set to include note lag
+hoax_note_ratings_sum <- hoax_note_ratings_sum %>%
+  left_join(time_diff_note %>% select(noteId, time_difference),
+           by = "noteId")
+
+# filter to ntoes for top25 twitter users during hoax
+top_25_user_note_ratings <- hoax_note_ratings %>%
+  filter(noteId %in% top25_followed_users$noteId)
+
+# calculate note ratings for top25 twitter users during hoax
+top25_hoax_note_ratings_sum <- top_25_user_note_ratings %>%
+  group_by(noteId) %>%
+  summarize(
+    ratedOnTweetId_count = n(), # Count observations
+    agree_mean = mean(agree, na.rm = TRUE),
+    disagree_mean = mean(disagree, na.rm = TRUE),
+    helpfulOther_mean = mean(helpfulOther, na.rm = TRUE),
+    helpfulClear_mean = mean(helpfulClear, na.rm = TRUE),
+    helpfulGoodSources_mean = mean(helpfulGoodSources, na.rm = TRUE),
+    helpfulAddressesClaim_mean = mean(helpfulAddressesClaim, na.rm = TRUE),
+    helpfulImportantContext_mean = mean(helpfulImportantContext, na.rm = TRUE),
+    helpfulUnbiasedLanguage_mean = mean(helpfulUnbiasedLanguage, na.rm = TRUE),
+    notHelpfulOther_mean = mean(notHelpfulOther, na.rm = TRUE),
+    notHelpfulIncorrect_mean = mean(notHelpfulIncorrect, na.rm = TRUE),
+    notHelpfulSourcesMissingOrUnreliable_mean = mean(notHelpfulSourcesMissingOrUnreliable, na.rm = TRUE),
+    notHelpfulMissingKeyPoints_mean = mean(notHelpfulMissingKeyPoints, na.rm = TRUE),
+    notHelpfulHardToUnderstand_mean = mean(notHelpfulHardToUnderstand, na.rm = TRUE),
+    notHelpfulArgumentativeOrBiased_mean = mean(notHelpfulArgumentativeOrBiased, na.rm = TRUE),
+    notHelpfulSpamHarassmentOrAbuse_mean = mean(notHelpfulSpamHarassmentOrAbuse, na.rm = TRUE),
+    notHelpfulIrrelevantSources_mean = mean(notHelpfulIrrelevantSources, na.rm = TRUE),
+    notHelpfulOpinionSpeculation_mean = mean(notHelpfulOpinionSpeculation, na.rm = TRUE),
+    notHelpfulNoteNotNeeded_mean = mean(notHelpfulNoteNotNeeded, na.rm = TRUE)
+  )
+
+top25_hoax_note_ratings_sum <- top25_hoax_note_ratings_sum %>%
+  drop_na(agree_mean, disagree_mean,
+          helpfulOther_mean, helpfulClear_mean, helpfulGoodSources_mean,
+          helpfulAddressesClaim_mean, helpfulImportantContext_mean,
+          helpfulUnbiasedLanguage_mean, notHelpfulOther_mean,
+          notHelpfulIncorrect_mean, notHelpfulSourcesMissingOrUnreliable_mean,
+          notHelpfulMissingKeyPoints_mean,
+          notHelpfulHardToUnderstand_mean, notHelpfulArgumentativeOrBiased_mean,
+          notHelpfulSpamHarassmentOrAbuse_mean, notHelpfulIrrelevantSources_mean,
+          notHelpfulOpinionSpeculation_mean, notHelpfulNoteNotNeeded_mean)
+
+hoax_note_ratings_sum <- hoax_note_ratings_sum %>%
+  mutate(
+    topHoaxTweeter = ifelse(noteId %in% top25_hoax_note_ratings_sum$noteId, 1, 0),
+  ) %>%
+  left_join(time_diff_note %>% select(noteId, time_difference), by = "noteId")
+
+```
+
+```{r}
+
+# viz of time_difference vs notHelpfulArgumentativeOrBiased_mean
+ggplot(hoax_note_ratings_sum, aes(x = time_difference.x, y = notHelpfulArgumentativeOrBiased_mean, color = factor(topHoaxTweeter))) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  geom_smooth(
+    data = subset(hoax_note_ratings_sum, topHoaxTweeter == 1),
+    method = "lm",
+    color = "orange",
+    se = TRUE
+  ) +
+  scale_color_manual(
+    values = c("0" = "gray", "1" = "blue"),
+    labels = c(
+      "0" = "Others",
+      "1" = "Top 25 Hoax Tweeter"
+    )
+  ) +
+  xlim(NA, 12) +
+  theme_minimal() +
+  labs(
+    title = "Scatterplot of Time Difference vs Not Helpful Argumentative or Biased (Mean)",
+    x = "Time Difference",
+    y = "Not Helpful Argumentative or Biased (Mean)",
+    color = "Legend"
+  )
+
+```
+
+```{r Categorization of Tweets tagged by Community Notes}
+
+# viz bar plot for leading vs. misleading notes
+leading_misleading <- haiti_notes %>%
+  group_by(classification, trustworthySources) %>%
+  summarize(
+    num = n()
+  ) %>%
+  mutate(
+    proportion = num / sum(num),
+    classification = as.factor(classification),
+    trustworthySources = as.factor(trustworthySources)
+  )
+leading_misleading
+
+# plot tweet/noteSource rating distribution
+leading_misleading_plot <- ggplot(leading_misleading, aes(x = num, y = classification, fill = trustworthySources)) +
+  geom_bar(stat = "identity") +
+  labs(x = "",
+       y = "Classification",
+       fill = "" 
+  ) +
+  scale_fill_manual(
+    values = c("1" = "blue", "0" = "red"), 
+    labels = c("Trustworthy sources", "No trustworthy sources") 
+  ) +
+  scale_y_discrete(
+    labels = c("MISINFORMED_OR_POTENTIALLY_MISLEADING" = "Misleading", "NOT_MISLEADING" = "Not Misleading") 
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 10, face = "italic"),
+    axis.text.x = element_text(size = 10), 
+    plot.title = element_text(size = 14, face = "bold"), 
+    legend.text = element_text(size = 10), 
+    legend.position = "top" 
+  )
+leading_misleading_plot
+
+```
+
+```{r Why do users report misleading tweets?}
+
+# calculate misleading tweet rating distribution
+misleading_why <- haiti_notes %>%
+  summarize( other = sum(misleadingOther, na.rm = TRUE),
+             factualError = sum(misleadingFactualError, na.rm = TRUE),
+             manipulatedMedia = sum(misleadingManipulatedMedia, na.rm = TRUE),
+             outdatedInfo = sum(misleadingOutdatedInformation, na.rm = TRUE),
+             missingContext = sum(misleadingMissingImportantContext, na.rm = TRUE),
+             unverifiedClaim = sum(misleadingUnverifiedClaimAsFact, na.rm = TRUE),
+             satire = sum(misleadingSatire, na.rm = TRUE)
+  ) %>%
+  pivot_longer(cols = everything(), names_to = "misleadingReason", values_to = "count") %>%
+  arrange(count) %>%
+  mutate(misleadingReason = factor(misleadingReason, levels = misleadingReason))
+misleading_why
+
+# plot misleading tweet rating distribution
+misleading_why_plot <- ggplot(misleading_why, aes(y = misleadingReason, x = count, fill = misleadingReason)) +
+  geom_bar(stat = "identity") +
+  labs(
+    y = "",
+    x = "",
+    title = ""
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(hjust = 1), 
+    legend.position = "none"
+  )
+
+misleading_why_plot
+
+```
+```{r Why do users report not misleading tweets?}
+
+# calculate notmisleading tweet rating distribution
+notMisleading_why <- haiti_notes %>%
+  summarize( other = sum(notMisleadingOther, na.rm = TRUE),
+             factuallyCorrect = sum(notMisleadingFactuallyCorrect, na.rm = TRUE),
+             newlyOutdated = sum(notMisleadingOutdatedButNotWhenWritten, na.rm = TRUE),
+             satire = sum(notMisleadingClearlySatire, na.rm = TRUE),
+             opinion = sum(notMisleadingPersonalOpinion, na.rm = TRUE),
+  ) %>%
+  pivot_longer(cols = everything(), names_to = "notMisleadingReason", values_to = "count") %>%
+  arrange(count) %>%
+  mutate(notMisleadingReason = factor(notMisleadingReason, levels = notMisleadingReason))
+notMisleading_why
+
+# plot notmisleading tweet rating distribution
+notMisleading_why_plot <- ggplot(notMisleading_why, aes(y = notMisleadingReason, x = count, fill = notMisleadingReason)) +
+  geom_bar(stat = "identity") +
+  labs(
+    y = "",
+    x = "",
+    title = ""
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(hjust = 1), 
+    legend.position = "none"
+  )
+notMisleading_why_plot
+
+
+```
+
+```{r Why do users find Community Notes helpful?}
+
+# helpfulness ratings totals
+helpOrNotHelp <- hoax_note_ratings %>%
+    group_by(helpfulnessLevel) %>%
+    summarize(sum = n())
+helpOrNotHelp
+
+# calculate helpful note rating distribution
+helpful <- hoax_note_ratings %>%
+  summarize(
+    helpfulOther = sum(helpfulOther, na.rm = TRUE),
+    helpfulClear = sum(helpfulClear, na.rm = TRUE),
+    helpfulGoodSources = sum(helpfulGoodSources, na.rm = TRUE),
+    helpfulAddressesClaim = sum(helpfulAddressesClaim, na.rm = TRUE),
+    helpfulImportantContext = sum(helpfulImportantContext, na.rm = TRUE),
+    helpfulUnbiasedLanguage = sum(helpfulUnbiasedLanguage, na.rm = TRUE)
+  ) %>%
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "count") %>%
+  arrange(desc(count)) %>% 
+  mutate(
+    total = sum(count), 
+    proportion = count / total, 
+    variable = factor(variable, levels = variable) 
+  )
+helpful
+
+# plot helpful note rating distribution
+helpful_plot <- ggplot(helpful, aes(y = variable, x = count, fill = variable)) +
+  geom_bar(stat = "identity") +
+  labs(
+    x = "",
+    y = "",
+    title = ""
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    legend.position = "none"
+  )
+helpful_plot
+
+
+
+```
+
+```{r Why do users find Community Notes unhelpful? }
+
+# calculate nothelpful note rating distribution
+notHelpful_summary <- hoax_note_ratings %>%
+  summarize(
+    notHelpfulOther = sum(notHelpfulOther, na.rm = TRUE),
+    notHelpfulIncorrect = sum(notHelpfulIncorrect, na.rm = TRUE),
+    notHelpfulSourcesMissingOrUnreliable = sum(notHelpfulSourcesMissingOrUnreliable, na.rm = TRUE),
+    notHelpfulOpinionSpeculationOrBias = sum(notHelpfulOpinionSpeculationOrBias, na.rm = TRUE),
+    notHelpfulMissingKeyPoints = sum(notHelpfulMissingKeyPoints, na.rm = TRUE),
+    notHelpfulHardToUnderstand = sum(notHelpfulHardToUnderstand, na.rm = TRUE),
+    notHelpfulArgumentativeOrBiased = sum(notHelpfulArgumentativeOrBiased, na.rm = TRUE),
+    notHelpfulSpamHarassmentOrAbuse = sum(notHelpfulSpamHarassmentOrAbuse, na.rm = TRUE),
+    notHelpfulIrrelevantSources = sum(notHelpfulIrrelevantSources, na.rm = TRUE),
+    notHelpfulOpinionSpeculation = sum(notHelpfulOpinionSpeculation, na.rm = TRUE),
+    notHelpfulNoteNotNeeded = sum(notHelpfulNoteNotNeeded, na.rm = TRUE)
+  ) %>%
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "count") %>%
+  arrange(desc(count)) %>% 
+  mutate(
+    total = sum(count), 
+    proportion = count / total,
+    variable = factor(variable, levels = variable) 
+  )
+notHelpful_summary
+
+# plot nothelpful note rating distribution
+notHelpful_plot <- ggplot(notHelpful_summary, aes(y = variable, x = count, fill = variable)) +
+  geom_bar(stat = "identity") +
+  labs(
+    x = "",
+    y = "",
+    title = ""
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(hjust = 1), 
+    legend.position = "none"
+  )
+notHelpful_plot
+
+```
+
+```{r community note sentiment analysis}
+
+library("quanteda")
+library("quanteda.textstats")
+
+# sentiment scores for community notes
+    # a positive score means the text is more positive, and a negative score means it’s more negative.
+
+# unnest (tokenize) the words in the 'summary' column for each note
+haiti_notes_token <- haiti_notes %>%
+  unnest_tokens(word, summary)
+
+# find sentiment scores for each note
+notes_sentiment_data <- haiti_notes_token %>%
+  inner_join(get_sentiments("nrc"), by = "word") %>%
+  count(noteId, sentiment, sort = TRUE) %>%
+  spread(sentiment, n, fill = 0) %>%
+  mutate(sentiment_score = positive - negative)
+
+# append sentiment scores to 'haiti_note_characteristics'
+haiti_notes_characteristics <- haiti_notes %>%
+  left_join(notes_sentiment_data, by = "noteId") %>%
+  select(noteId, summary, classification, trustworthySources,
+         sentiment_score, negative, positive, fear, anger, trust, joy)
+
+# visualize sentiment distribution
+ggplot(notes_sentiment_data, aes(x = sentiment_score)) +
+  geom_histogram(binwidth = 1, fill = "blue", color = "black") +
+  theme_minimal() +
+  ggtitle("Sentiment Distribution of Note Summaries") +
+  xlab("Sentiment Score") +
+  ylab("Frequency")
+
+```
+
+```{r text complexity analysis of each note}
+
+# tokenize each word in every note
+haiti_notes_token
+
+# create corpus of note tokens
+notes_corpus <- corpus(haiti_notes_token, text_field = "word")
+
+# calculate gunning-fog scores for each word
+haiti_notes_readability <- textstat_readability(notes_corpus, measure = "FOG")
+
+# find readability scores for each note
+notes_readability_data <- cbind(haiti_notes_token, haiti_notes_readability) %>%
+  group_by(noteId) %>%
+  summarize(complexity = mean(FOG, na.rm = TRUE))
+
+# append sentiment scores to "haiti_note_characteristics"
+haiti_notes_characteristics <- haiti_notes_characteristics %>%
+  left_join(notes_readability_data, by = "noteId")
+
+```
+
+```{r word count of each note}
+
+# word count of each note
+haiti_notes_characteristics <- haiti_notes_characteristics %>%
+  rename(text = summary) %>% # rename 'summary' to 'text' to avoid conflict with base summary() function
+  mutate(wordCount = str_count(text, "\\b\\w+")) %>% # matches words with word boundaries
+  rename(summary = text)
+
+```
+
+```{r}
+
+# assembling final characteristics dataframe for linear model
+
+# content characteristics for notes
+haiti_notes_characteristics <- haiti_notes_characteristics %>% 
+  mutate(misleading = if_else(classification == "NOT_MISLEADING", 0, 1)) %>% # restructure levels of 'classification' for model
+  select(noteId, summary, classification, misleading, trustworthySources, wordCount, complexity, 
+         sentiment_score, negative, positive, fear, anger, trust, joy)
+
+# user characteristics for notes
+haiti_user_characteristics <- noted_tweets %>%
+  left_join(users, by = c("authorId" = "id")) %>%
+  select(noteId, username, authorId, followers_count, following_count, verified, user_created_at)
+
+# merge note and user characteristics
+haiti_regression_characteristics <- haiti_notes_characteristics %>%
+  left_join(haiti_user_characteristics, by = "noteId")
+
+# count number of helpful and unhelpful ratings for each note
+hoax_helpful_ratings_sum <- hoax_note_ratings %>%
+ group_by(noteId) %>%
+  summarize(HVotes = sum(helpfulnessLevel == "HELPFUL"),
+            Votes = n())
+
+# append ratings sum to regression characteristics
+haiti_regression_characteristics <- haiti_regression_characteristics %>%
+  left_join(hoax_helpful_ratings_sum, by = "noteId")
+
+```
+
+
+```{r}
+
+# z-standardize numerical predictors
+haiti_regression_characteristics <- haiti_regression_characteristics %>%
+  mutate(
+    complexity_z = scale(complexity),
+    sentiment_z = scale(sentiment_score),
+    wordCount_z = scale(wordCount),
+    followers_z = scale(followers_count),
+    following_z = scale(following_count),
+  )
+
+# fit the binomial regression model
+helpfulness_model <- glm(
+  cbind(HVotes, Votes - HVotes) ~ (misleading + trustworthySources) +
+    (complexity_z + sentiment_z + wordCount_z) +
+    (followers_z + following_z + verified),
+  family = binomial(link = "logit"),
+  data = haiti_regression_characteristics 
+)
+
+# view the model summary
+summary(helpfulness_model)
+
+
+```
+
+```{r}
+
+library(car)
+
+# refit the model as a linear model for VIF calculation
+vif_helpfulness_model <- lm(
+  HVotes / Votes ~ misleading + trustworthySources + complexity_z + 
+    sentiment_z + wordCount_z + followers_z + following_z + verified, 
+  data = haiti_regression_characteristics
+)
+
+# calculate VIF
+vif_values <- vif(vif_helpfulness_model)
+print(vif_values)
+
+```
+

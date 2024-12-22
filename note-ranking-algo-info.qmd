@@ -1,0 +1,31 @@
+# Note Status
+
+Community Notes are submitted and rated by contributors. Ratings are used to determine note statuses (“Helpful”, “Not Helpful”, or “Needs More Ratings”). Note statuses determine which notes are displayed on each of the Community Notes Site’s timelines, and which notes are displayed on posts.
+
+*All Community Notes start with the Needs More Ratings status until they receive at least 5 total ratings.* - Notes with 5 or more ratings may be assigned a status of Helpful or Not Helpful according to the algorithm described below. - If a note is deleted, the algorithm will still score it (using all non-deleted ratings of that note) and the note will receive a status if its been rated more than 5 times, although since it is deleted it will not be shown on X even if its status is Helpful.
+
+## How a note gets posted
+
+Notes marking posts as "potentially misleading" with a Note Helpfulness Score of 0.40 and above earn the status of Helpful. **At this time, only notes that indicate a post is “potentially misleading” and earn the status of Helpful are eligible to be displayed on posts.**
+
+-   Notes with a Note Helpfulness Score less than `-0.05 -0.8 * abs(noteFactorScore)` are assigned Not Helpful, where `noteFactorScore` is described in Matrix Factorization.
+-   Additionally, notes with an upper confidence bound estimate of their Note Helpfulness Score (as computed via pseudo-raters) less than -0.04 are assigned Not Helpful, as described in Modeling Uncertainty.
+-   Notes with scores in between remain with a status of Needs more Ratings.
+
+When a note reaches a status of Helpful / Not Helpful, they're shown alongside the two most commonly chosen explanation tags which describe the reason the note was rated helpful or unhelpful. Notes with the status Needs More Ratings remain sorted by recency (newest first), and notes with a Helpful or Not Helpful status are sorted by their Helpfulness Score.
+
+## Helpful Rating Mapping
+
+When rating notes, contributors answer the question “Is this note helpful?” Answers to that question are then used to rank notes. People to choose between “yes,” “somewhat” and “no.” We map these responses to continuous values from 0.0 to 1.0, hereafter referred to as “helpful scores”: - Yes maps to 1.0 - Somewhat maps to 0.5. - No maps to 0.0.
+
+## Matrix Factorization
+
+# Multi-Model Note Ranking
+
+Multi-Model ranking allows Community Notes to run multiple ranking algorithms before reconciling the results to assign final note status. We use this ability to test new models, refine current approaches and support expanding the Community Notes contributor base. Each variation uses the same modeling logic and parameters, but applies the model to different slices of the ratings data.
+
+-   The Core model determines status for notes with most ratings from geographical areas where Community Notes is well established (e.g. the US, where Community Notes has been available for multiple years). We refer to established areas as Core areas and areas where Community Notes has recently launched as Expansion areas. The Core model includes ratings from users in Core areas on notes where the majority of ratings also came from users in Core areas.
+-   The Expansion model runs the same ranking algorithm with the same parameters as the Core model, with the difference that the Expansion model includes all notes with all ratings across Core and Expansion areas.
+-   The Group models operate on smaller segments of the data to specifically improve note ranking in non-English speaking communities. Users are assigned to modeling groups (e.g. based on region, country or language) and then we run a separate matrix factorization for each group. The matrix factorization includes all ratings from users in the modeling group, but the scoring results only impact notes which were written by a member of the modeling group and have at least 80% of ratings from within the modeling group. We initially launched with 12 Group models and plan to monitor and adjust as Community Notes continues to grow.
+
+## Topic Modeling

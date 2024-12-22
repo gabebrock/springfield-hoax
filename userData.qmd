@@ -1,0 +1,122 @@
+---
+title: "Community Note User Data"
+---
+
+```{r data and libraries}
+
+# loading data
+
+library(tidyverse)
+library(lubridate)
+
+# disable scientific notation
+options(scipen = 999)
+
+# all springfield hoax noted tweets
+tweets <- read_csv("data/tweet_data.csv",
+                   col_types = cols(tweetCreatedAt = col_datetime(format = "%Y-%m-%d %H:%M:%S+00:00"))) %>%
+          distinct(id, .keep_all = TRUE)
+
+# all hoax tweeters
+users <- read_csv("data/author_data.csv", 
+                  col_types = cols(user_created_at = col_datetime(format = "%Y-%m-%d %H:%M:%S+00:00")))
+
+# all hoax community notes
+haiti_notes <- read_csv("data/haiti community notes.xlsx - catsORdogsOReat.csv", 
+                        col_types = cols(noteCreatedAt = col_datetime(format = "%m/%d/%Y %H:%M:%S"),
+                                         misleadingOther = col_double())) %>%
+          distinct(noteId, .keep_all = TRUE)
+
+# complete community note status history
+note_status_history <- read_tsv("data/noteStatusHistory/noteStatusHistory-00000.tsv")
+
+# complete community note user enrollment statuses
+user_enroll_status <- read_tsv("data/userEnrollmentStatus/userEnrollment-00000.tsv",
+                               col_types = cols(timestampOfLastStateChange = col_number(),
+                                                timestampOfLastEarnOut = col_number()))
+
+```
+
+```{r joining data sets}
+
+# assign community notes for corresponding tweets
+noted_tweets <- haiti_notes %>%
+  left_join(tweets, by = c("tweetId" = "id"))
+
+# assign tweets to users
+user_tweets <- tweets %>%
+  left_join(users, by = c("authorId" = "id"))
+
+# find enrollment statuses of hoax community noters
+hoax_noters_status <- user_enroll_status %>%
+  filter(participantId %in% haiti_notes$noteAuthorParticipantId)
+
+```
+
+```{r converting epoch time in dfs}
+
+# Convert all specified epoch time columns to formatted datetime
+hoax_noters_status <- hoax_noters_status %>%
+  mutate(across(
+    .cols = c(timestampOfLastStateChange, timestampOfLastEarnOut),
+    .fns = ~ format(as_datetime(./1000, origin = "1970-01-01", tz = "UTC"), 
+                    format = "%Y-%m-%d %H:%M:%S+00:00")
+  ))
+
+```
+
+
+```{r time difference betweet tweet post and note tag}
+
+# calculate the difference in time
+noted_tweets <- noted_tweets %>%
+  mutate(time_difference = as.numeric(abs(difftime(noteCreatedAt, tweetCreatedAt, units = "hours"))))
+
+# calculate lag time between tweet post and note tag for each tweet
+time_diff_note <- noted_tweets %>%
+  select(tweetCreatedAt,  noteCreatedAt, time_difference, text, summary, likes, replies, retweets, quotes)
+
+# calculate average lag time between tweet post and note tag
+avg_note_lag <- time_diff_note %>%
+  summarize(avg_note_lag = sum(time_difference, na.rm = TRUE) / n())
+print(avg_note_lag)
+
+# group by before and after the trump-harris presidential debate (12AM 9/11/2024) and calculate average note lag
+avg_note_lag_debate <- time_diff_note %>%
+  mutate(debate = ifelse(noteCreatedAt < as.Date("2024-09-11"), "Before September 10, 11:59 PM", "On or After September 11, 12 AM")) %>%
+  group_by(debate) %>%
+  summarize(
+    num = n(),
+    avg_note_lag = sum(time_difference, na.rm = TRUE) / n())
+print(avg_note_lag_debate)
+
+```
+
+```{r top noters}
+
+# assign notes to users
+user_notes <- haiti_notes %>%
+  left_join(hoax_noters_status, by =c("noteAuthorParticipantId" = "participantId"))
+
+# find number of tweets by user
+notes_by_user <- user_notes %>%
+  group_by(noteAuthorParticipantId) %>%
+  summarize(num = n())
+notes_by_user
+
+# create df of top-25 hoax tweeters
+top_noters <- user_notes %>%
+  count(noteAuthorParticipantId, sort = TRUE) %>%
+  head(25) %>%
+  left_join(hoax_noters_status, by = c("noteAuthorParticipantId" = "participantId")) %>%
+  select(noteAuthorParticipantId, n, enrollmentState, timestampOfLastStateChange, timestampOfLastEarnOut, 
+         numberOfTimesEarnedOut, modelingPopulation, modelingGroup)
+top_noters
+
+# add a grouping column to noted_tweets
+top25_active_notersnoted_tweets <- noted_tweets %>%
+  fil
+
+```
+
+

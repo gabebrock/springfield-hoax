@@ -1,0 +1,142 @@
+---
+title: "Community Note User Data"
+---
+
+```{r data and libraries}
+
+# loading data
+
+library(tidyverse)
+library(lubridate)
+
+# disable scientific notation
+options(scipen = 999)
+
+# all hoax community notes
+haiti_notes <- read_csv("data/haiti community notes.xlsx - catsORdogsOReat.csv", 
+                        col_types = cols(noteCreatedAt = col_datetime(format = "%m/%d/%Y %H:%M:%S"),
+                                         misleadingOther = col_double())) %>%
+          distinct(noteId, .keep_all = TRUE)
+
+# complete community note user enrollment statuses
+user_enroll_status <- read_tsv("data/userEnrollmentStatus/userEnrollment-00000.tsv",
+                               col_types = cols(timestampOfLastStateChange = col_number(),
+                                                timestampOfLastEarnOut = col_number()))
+
+```
+
+```{r loading rating files}
+
+ratings_003 <- read_tsv("data/noteRatings/ratings-00003.tsv")
+ratings_004 <- read_tsv("data/noteRatings/ratings-00004.tsv")
+ratings_006 <- read_tsv("data/noteRatings/ratings-00006.tsv")
+ratings_007 <- read_tsv("data/noteRatings/ratings-00007.tsv")
+ratings_010 <- read_tsv("data/noteRatings/ratings-00010.tsv")
+ratings_011 <- read_tsv("data/noteRatings/ratings-00011.tsv")
+
+ratings_013 <- read_tsv("data/noteRatings/ratings-00013.tsv")
+ratings_014 <- read_tsv("data/noteRatings/ratings-00014.tsv")
+ratings_015 <- read_tsv("data/noteRatings/ratings-00015.tsv")
+ratings_009 <- read_tsv("data/noteRatings/ratings-00009.tsv")
+ratings_008 <- read_tsv("data/noteRatings/ratings-00008.tsv")
+ratings_012 <- read_tsv("data/noteRatings/ratings-00012.tsv")
+
+```
+
+```         
+```
+
+```{r joining data sets}
+
+# assign community notes for corresponding tweets
+noted_tweets <- haiti_notes %>%
+  left_join(tweets, by = c("tweetId" = "id"))
+
+# assign tweets to users
+user_tweets <- tweets %>%
+  left_join(users, by = c("authorId" = "id"))
+
+# find enrollment statuses of hoax community noters
+hoax_noters_status <- user_enroll_status %>%
+  filter(participantId %in% haiti_notes$noteAuthorParticipantId)
+
+```
+
+```{r filtering rating datasets}
+
+filter_ratings003 <- ratings_003 %>%
+  filter(noteId %in% haiti_notes$noteId)
+write.csv(filter_ratings003, "data/noteRatings/filtered_ratings/filter_ratings003.csv", row.names = FALSE)
+
+filter_ratings004 <- ratings_004 %>%
+  filter(noteId %in% haiti_notes$noteId)
+write.csv(filter_ratings004, "data/noteRatings/filtered_ratings/filter_ratings004.csv", row.names = FALSE)
+
+filter_ratings006 <- ratings_006 %>%
+  filter(noteId %in% haiti_notes$noteId)
+write.csv(filter_ratings006, "data/noteRatings/filtered_ratings/filter_ratings006.csv", row.names = FALSE)
+
+filter_ratings007 <- ratings_007 %>%
+  filter(noteId %in% haiti_notes$noteId)
+write.csv(filter_ratings007, "data/noteRatings/filtered_ratings/filter_ratings007.csv", row.names = FALSE)
+
+filter_ratings010 <- ratings_010 %>%
+  filter(noteId %in% haiti_notes$noteId)
+write.csv(filter_ratings010, "data/noteRatings/filtered_ratings/filter_ratings010.csv", row.names = FALSE)
+
+filter_ratings011 <- ratings_011 %>%
+  filter(noteId %in% haiti_notes$noteId)
+write.csv(filter_ratings011, "data/noteRatings/filtered_ratings/filter_ratings011.csv", row.names = FALSE)
+
+filter_ratings013 <- ratings_013 %>%
+  filter(noteId %in% haiti_notes$noteId)
+write.csv(filter_ratings013, "data/noteRatings/filtered_ratings/filter_ratings013.csv", row.names = FALSE)
+
+filter_ratings014 <- ratings_014 %>%
+  filter(noteId %in% haiti_notes$noteId)
+write.csv(filter_ratings014, "data/noteRatings/filtered_ratings/filter_ratings014.csv", row.names = FALSE)
+
+filter_ratings015 <- ratings_015 %>%
+  filter(noteId %in% haiti_notes$noteId)
+write.csv(filter_ratings015, "data/noteRatings/filtered_ratings/filter_ratings015.csv", row.names = FALSE)
+
+filter_ratings009 <- ratings_009 %>%
+  filter(noteId %in% haiti_notes$noteId)
+write.csv(filter_ratings009, "data/noteRatings/filtered_ratings/filter_ratings009.csv", row.names = FALSE)
+
+filter_ratings008 <- ratings_008 %>%
+  filter(noteId %in% haiti_notes$noteId)
+write.csv(filter_ratings008, "data/noteRatings/filtered_ratings/filter_ratings008.csv", row.names = FALSE)
+
+filter_ratings012 <- ratings_012 %>%
+  filter(noteId %in% haiti_notes$noteId)
+write.csv(filter_ratings012, "data/noteRatings/filtered_ratings/filter_ratings012.csv", row.names = FALSE)
+
+filter_ratings000 <- read_csv("data/noteRatings/filtered_ratings/filter_ratings000.csv")
+filter_ratings001 <- read_csv("data/noteRatings/filtered_ratings/filter_ratings001.csv")
+filter_ratings002 <- read_csv("data/noteRatings/filtered_ratings/filter_ratings002.csv")
+
+  
+# combining all_filter ratings
+all_filter_ratings <- rbind(filter_ratings000, filter_ratings001, filter_ratings002,
+                            filter_ratings003, filter_ratings004, 
+                            filter_ratings006, filter_ratings007, filter_ratings008, 
+                            filter_ratings009, filter_ratings010, filter_ratings011, 
+                            filter_ratings012, filter_ratings013, filter_ratings014, 
+                            filter_ratings015, by = "noteId")
+
+write.csv(all_filter_ratings, "data/noteRatings/filtered_ratings/all_filter_ratings.csv", row.names = FALSE)
+
+```
+
+```{r converting epoch time in dfs}
+
+# Convert all specified epoch time columns to formatted datetime
+hoax_noters_status <- hoax_noters_status %>%
+  mutate(across(
+    .cols = c(timestampOfLastStateChange, timestampOfLastEarnOut),
+    .fns = ~ format(as_datetime(./1000, origin = "1970-01-01", tz = "UTC"), 
+                    format = "%Y-%m-%d %H:%M:%S+00:00")
+  ))
+
+```
